@@ -1,0 +1,19 @@
+import { useEffect, useState } from 'react'
+import { Activity, ArrowLeft, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
+import type { AppSession } from '../domain/product'
+import { productApi, saveSession } from '../api/productApi'
+
+export function Onboarding({ onAuthenticated, onOffline }: { onAuthenticated: (session: AppSession) => void; onOffline: () => void }) {
+  const [step, setStep] = useState<'mobile' | 'otp'>('mobile')
+  const [countryCode, setCountryCode] = useState('+91')
+  const [mobile, setMobile] = useState('')
+  const [otp, setOtp] = useState('')
+  const [countdown, setCountdown] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [demoOtp, setDemoOtp] = useState<string>()
+  useEffect(() => { if (!countdown) return; const timer = window.setInterval(() => setCountdown((value) => Math.max(0, value - 1)), 1000); return () => clearInterval(timer) }, [countdown])
+  const send = async () => { setLoading(true); setError(''); try { const result = await productApi.sendOtp(countryCode, mobile); setDemoOtp(result.demo ? result.demoOtp : undefined); setCountdown(result.resendAfterSeconds); setStep('otp') } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to send OTP.') } finally { setLoading(false) } }
+  const verify = async () => { setLoading(true); setError(''); try { const session = await productApi.verifyOtp(countryCode, mobile, otp); await saveSession(session); onAuthenticated(session) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to verify OTP.') } finally { setLoading(false) } }
+  return <main className="onboarding"><section className="onboarding-card"><div className="onboarding-brand"><div className="brand-mark"><Activity /></div><div><strong>Trading Signal Pro</strong><span>SECURE APPLICATION ACCESS</span></div></div><div className="onboarding-icon">{step === 'mobile' ? <ShieldCheck /> : <CheckCircle2 />}</div><p className="eyebrow">{step === 'mobile' ? 'Welcome' : 'Verify your mobile'}</p><h1>{step === 'mobile' ? 'Signals with context.' : 'Enter the 6-digit code'}</h1><p className="muted">{step === 'mobile' ? 'Create a verified application session. Broker credentials are never requested here.' : `Code sent to ${countryCode} ${mobile}`}</p>{step === 'mobile' ? <div className="phone-row"><select aria-label="Country code" value={countryCode} onChange={(event) => setCountryCode(event.target.value)}><option>+91</option><option>+1</option><option>+44</option><option>+971</option></select><input aria-label="Mobile number" inputMode="numeric" maxLength={15} placeholder="Mobile number" value={mobile} onChange={(event) => setMobile(event.target.value.replace(/\D/g, ''))} /></div> : <><input className="otp-input" aria-label="One-time password" inputMode="numeric" maxLength={6} placeholder="••••••" value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} />{demoOtp && <div className="demo-otp">Development provider · OTP: <strong>{demoOtp}</strong></div>}</>}{error && <div className="form-error">{error}</div>}<button className="primary full" disabled={loading || (step === 'mobile' ? mobile.length < 7 : otp.length !== 6)} onClick={step === 'mobile' ? send : verify}>{loading ? <Loader2 className="spin" size={16} /> : null}{step === 'mobile' ? 'Send verification code' : 'Verify and continue'}</button>{step === 'otp' && <div className="otp-actions"><button onClick={() => { setStep('mobile'); setError('') }}><ArrowLeft size={13} /> Change number</button><button disabled={countdown > 0 || loading} onClick={send}>{countdown ? `Resend in ${countdown}s` : 'Resend OTP'}</button></div>}<button className="offline-link" onClick={onOffline}>Backend unavailable? Continue in clearly labeled offline demo</button><small className="security-copy">We never ask for broker passwords, PINs, OTPs, or TOTP seeds.</small></section></main>
+}

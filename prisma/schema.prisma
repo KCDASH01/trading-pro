@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum Market {
+  INDIA
+  US
+  CRYPTO
+}
+
+enum Direction {
+  BUY
+  SELL
+}
+
+enum SignalStatus {
+  ACTIVE
+  TARGET_HIT
+  STOP_HIT
+  EXPIRED
+  CLOSED
+}
+
+enum BrokerStatus {
+  NOT_CONNECTED
+  CONNECTING
+  CONNECTED
+  EXPIRED
+  RECONNECT_REQUIRED
+  ERROR
+}
+
+enum PaperOrderStatus {
+  PENDING
+  FILLED
+  CANCELLED
+  REJECTED
+}
+
+enum PaperTradeStatus {
+  OPEN
+  CLOSED
+}
+
+model User {
+  id               String             @id @default(uuid()) @db.Uuid
+  countryCode      String             @db.VarChar(8)
+  mobile           String             @db.VarChar(20)
+  mobileNormalized String             @unique @db.VarChar(24)
+  mobileVerifiedAt DateTime
+  status           UserStatus         @default(ACTIVE)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  sessions         AuthSession[]
+  preference       UserPreference?
+  strategies       UserStrategy[]
+  brokers          BrokerConnection[]
+  paperAccount     PaperAccount?
+}
+
+model AuthSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @unique @db.Char(64)
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastSeenAt DateTime  @default(now())
+  userAgent  String?   @db.VarChar(512)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model UserPreference {
+  userId              String   @id @db.Uuid
+  theme               Theme    @default(DARK)
+  signalNotifications Boolean  @default(true)
+  signalSound         Boolean  @default(false)
+  soundEffects        Boolean  @default(false)
+  signalHistory       Boolean  @default(true)
+  defaultMarket       Market   @default(INDIA)
+  defaultTimeframe    String   @default("15m") @db.VarChar(16)
+  riskPercentage      Decimal  @default(1) @db.Decimal(6, 3)
+  paperTradingEnabled Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Strategy {
+  id          String                @db.VarChar(80)
+  version     String                @db.VarChar(24)
+  displayName String                @db.VarChar(160)
+  category    String                @db.VarChar(80)
+  market      Market
+  enabled     Boolean               @default(true)
+  metadata    Json
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  users       UserStrategy[]
+  signals     Signal[]
+  performance StrategyPerformance[]
+
+  @@id([id, version])
+  @@index([market, enabled])
+}
+
+model UserStrategy {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @db.Uuid
+  strategyId           String   @db.VarChar(80)
+  strategyVersion      String   @db.VarChar(24)
+  applied              Boolean  @default(false)
+  notificationsEnabled Boolean  @default(true)
+  favorite             Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy             Strategy @relation(fields: [strategyId, strategyVersion], references: [id, version], onDelete: Cascade)
+
+  @@unique([userId, strategyId, strategyVersion])
+  @@index([userId, applied])
+  @@index([userId, favorite])
+}
+
+model Signal {
+  id                    String       @id @db.VarChar(180)
+  strategyId            String       @db.VarChar(80)
+  strategyVersion       String       @db.VarChar(24)
+  market                Market
+  exchange              String       @db.VarChar(40)
+  symbol                String       @db.VarChar(80)
+  timeframe             String       @db.VarChar(16)
+  direction             Direction
+  optionSide            String?      @db.VarChar(12)
+  entry                 Decimal      @db.Decimal(24, 8)
+  stopLoss              Decimal      @db.Decimal(24, 8)
+  target                Decimal      @db.Decimal(24, 8)
+  riskReward            Decimal      @db.Decimal(12, 6)
+  agreementScore        Int
+  calibratedProbability Decimal?     @db.Decimal(7, 6)
+  rsi                   Decimal?     @db.Decimal(12, 6)
+  generatedAt           DateTime
+  status                SignalStatus @default(ACTIVE)
+  recommended           Boolean      @default(false)
+  payload               Json
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  strategy              Strategy     @relation(fields: [strategyId, strategyVersion], references: [id, version], onDelete: Restrict)
+
+  @@index([generatedAt(sort: Desc)])
+  @@index([strategyId, strategyVersion, generatedAt(sort: Desc)])
+  @@index([symbol, timeframe, generatedAt(sort: Desc)])
+  @@index([status, generatedAt(sort: Desc)])
+  @@index([market, direction, generatedAt(sort: Desc)])
+}
+
+model StrategyPerformance {
+  id              String   @id @default(uuid()) @db.Uuid
+  strategyId      String   @db.VarChar(80)
+  strategyVersion String   @db.VarChar(24)
+  symbol          String   @db.VarChar(80)
+  timeframe       String   @db.VarChar(16)
+  window          String   @db.VarChar(80)
+  totalTrades     Int
+  wins            Int
+  losses          Int
+  winRate         Decimal  @db.Decimal(7, 4)
+  profitFactor    Decimal  @db.Decimal(16, 6)
+  expectancy      Decimal  @db.Decimal(24, 8)
+  averageRR       Decimal  @db.Decimal(12, 6)
+  maxDrawdown     Decimal  @db.Decimal(12, 6)
+  returnPct       Decimal  @db.Decimal(16, 6)
+  calculatedAt    DateTime
+  strategy        Strategy @relation(fields: [strategyId, strategyVersion], references: [id, version], onDelete: Cascade)
+
+  @@unique([strategyId, strategyVersion, symbol, timeframe, window])
+  @@index([calculatedAt(sort: Desc)])
+}
+
+model BrokerConnection {
+  id                String       @id @default(uuid()) @db.Uuid
+  userId            String       @db.Uuid
+  broker            String       @db.VarChar(40)
+  status            BrokerStatus @default(NOT_CONNECTED)
+  externalAccountId String?      @db.VarChar(160)
+  tokenReference    String?      @db.VarChar(255)
+  expiresAt         DateTime?
+  metadata          Json         @default("{}")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, broker])
+  @@index([status, expiresAt])
+}
+
+model PaperAccount {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @unique @db.Uuid
+  balance        Decimal      @db.Decimal(24, 8)
+  initialBalance Decimal      @db.Decimal(24, 8)
+  currency       String       @default("INR") @db.Char(3)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders         PaperOrder[]
+  trades         PaperTrade[]
+}
+
+model PaperOrder {
+  id          String           @id @default(uuid()) @db.Uuid
+  accountId   String           @db.Uuid
+  symbol      String           @db.VarChar(80)
+  direction   Direction
+  orderType   String           @db.VarChar(20)
+  quantity    Decimal          @db.Decimal(24, 8)
+  limitPrice  Decimal?         @db.Decimal(24, 8)
+  fillPrice   Decimal?         @db.Decimal(24, 8)
+  status      PaperOrderStatus @default(PENDING)
+  submittedAt DateTime         @default(now())
+  filledAt    DateTime?
+  updatedAt   DateTime         @updatedAt
+  account     PaperAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, submittedAt(sort: Desc)])
+  @@index([status])
+}
+
+model PaperTrade {
+  id          String           @id @default(uuid()) @db.Uuid
+  accountId   String           @db.Uuid
+  signalId    String?          @db.VarChar(180)
+  symbol      String           @db.VarChar(80)
+  direction   Direction
+  quantity    Decimal          @db.Decimal(24, 8)
+  entryPrice  Decimal          @db.Decimal(24, 8)
+  exitPrice   Decimal?         @db.Decimal(24, 8)
+  stopLoss    Decimal?         @db.Decimal(24, 8)
+  target      Decimal?         @db.Decimal(24, 8)
+  realizedPnl Decimal?         @db.Decimal(24, 8)
+  status      PaperTradeStatus @default(OPEN)
+  openedAt    DateTime         @default(now())
+  closedAt    DateTime?
+  updatedAt   DateTime         @updatedAt
+  account     PaperAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@index([openedAt(sort: Desc)])
+}
